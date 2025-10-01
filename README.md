@@ -42,9 +42,9 @@ pip install -r requirements.txt
 
 Crie o arquivo .env com suas credenciais:
 
-STACKSPOT_CLIENT_ID=seu_client_id
-STACKSPOT_CLIENT_KEY=seu_client_key
-STACKSPOT_REALM=stackspot-freemium
+CLIENT_ID=seu_client_id
+CLIENT_KEY=seu_client_key
+REALM=stackspot-freemium
 
 
 🔒 Não suba o .env para o GitHub.
