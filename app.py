@@ -1,171 +1,22 @@
 import streamlit as st
-import json
-import os
-import base64
-import requests
-from io import BytesIO
-from PIL import Image
-from dotenv import load_dotenv
-from orchestrator import multiagent_flow
+from agents.logo_maker import run_logo_maker
 
-# Carrega variáveis de ambiente
-load_dotenv()
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_KEY")
-REALM = os.getenv("REALM", "stackspot-freemium")
+st.set_page_config(page_title="Gerador de Logomarcas", layout="centered")
 
-if not all([CLIENT_ID, CLIENT_SECRET, REALM]):
-    st.error("⚠️ Variáveis de ambiente não carregadas corretamente. Verifique seu arquivo .env")
-    st.stop()
+st.title("🎨 Gerador de Logomarcas com StackSpot")
 
-st.set_page_config(page_title="PN-ZUP Multiagente", layout="wide")
-st.title("PN-ZUP Multiagente - Teste")
+st.markdown("Digite uma descrição para gerar sua logomarca automaticamente.")
 
-with st.form("user_inputs"):
-    business_idea = st.text_input(
-        "Ideia de negócio",
-        "Cafeteria para jovens com cafés especiais e doces artesanais",
-        help="Descreva sua ideia de negócio."
-    )
-    audience = st.text_input(
-        "Público-alvo",
-        "Universitários de 18 a 25 anos",
-        help="Quem é o público principal?"
-    )
-    cidade = st.text_input("Cidade", "Salvador")
-    tamanho = st.number_input("Tamanho do ponto (m²)", min_value=5, value=25)
-    logo_style = st.selectbox(
-        "Estilo da logomarca",
-        ["Moderno e profissional", "Divertido e colorido", "Minimalista", "Clássico", "Vintage"],
-        help="Escolha o estilo visual desejado para a logomarca."
-    )
-    submitted = st.form_submit_button("Gerar plano")
+# Campo para prompt
+prompt = st.text_input("Descrição da logomarca", "Logomarca moderna e minimalista para cafeteria")
 
-if submitted:
-    if not business_idea or not audience or not cidade:
-        st.warning("Por favor, preencha todos os campos obrigatórios.")
-        st.stop()
+if st.button("Gerar Logomarca"):
+    with st.spinner("Gerando sua logomarca..."):
+        resultado = run_logo_maker({"logo_prompt_for_ai": prompt})
 
-    user_input = {
-        "business_idea": business_idea,
-        "audience": audience,
-        "context_costs": {
-            "cidade": cidade,
-            "tamanho_ponto_m2": tamanho
-        },
-        "logo_style": logo_style,
-        "stk_client_id": CLIENT_ID,
-        "stk_client_key": CLIENT_SECRET,
-        "stk_realm": REALM
-    }
-
-    with st.spinner("Gerando plano de negócio..."):
-        try:
-            final_output = multiagent_flow(user_input)
-        except Exception as e:
-            st.error(f"Erro ao gerar o plano: {e}")
-            st.stop()
-
-    errors = final_output.get("errors", {})
-    for key, msg in errors.items():
-        if msg:
-            st.warning(f"⚠️ {key.capitalize()}: {msg}")
-
-    branding = final_output.get("branding", {})
-    st.header("🎨 Branding & Marketing")
-
-    nomes = branding.get('suggested_names', [])
-    st.subheader("Sugestões de nomes")
-    if nomes:
-        cols = st.columns(len(nomes))
-        for i, name in enumerate(nomes):
-            if cols[i].button(name, key=f"name_{i}_{name}"):
-                st.success(f"Nome '{name}' copiado! (Copie manualmente)")
+    if resultado["logo_image_url"]:
+        st.success("✅ Logomarca gerada com sucesso!")
+        st.image(resultado["logo_image_url"], caption=prompt, width=512)
+        st.markdown(resultado["logo_image_markdown"])
     else:
-        st.info("Nenhum nome sugerido. Tente uma ideia de negócio mais específica para sugestões mais criativas.")
-
-    st.subheader("Slogan")
-    st.info(branding.get('slogan', '-'))
-
-    st.subheader("Tom de marca")
-    st.write(branding.get('brand_tone', '-'))
-
-    st.subheader("Descrição da logomarca")
-    st.write(branding.get('logo_description', '-'))
-
-    st.subheader("Logo gerada")
-    logo_dict = final_output.get("logo", {})
-    logo_url = logo_dict.get("logo_image_url", "")
-    logo_base64 = logo_dict.get("logo_image_base64", "")
-
-    if logo_base64:
-        if "," in logo_base64:
-            base64_data = logo_base64.split(",")[1]
-        else:
-            base64_data = logo_base64
-        try:
-            image_data = base64.b64decode(base64_data)
-            image = Image.open(BytesIO(image_data))
-            st.image(image, caption="Logo criada para seu negócio", width="stretch")
-            st.success("Imagem exibida a partir do Base64!")
-        except Exception as e:
-            st.error(f"Erro ao decodificar imagem Base64: {e}")
-    elif logo_url:
-        try:
-            response = requests.get(logo_url)
-            if response.status_code == 200:
-                image = Image.open(BytesIO(response.content))
-                st.image(image, caption="Logo criada para seu negócio", width="stretch")
-                st.success("Imagem exibida a partir da URL!")
-            else:
-                st.error(f"Erro ao baixar imagem: Status {response.status_code}")
-        except Exception as e:
-            st.error(f"Erro ao exibir imagem da URL: {e}")
-    else:
-        st.warning("Logo não gerada. Verifique as credenciais e a API.")
-
-    # Custos
-    custos = final_output.get("costs", {})
-    st.header("💰 Investimento Inicial (CAPEX)")
-    capex = custos.get("capex_estimate", {})
-    if capex:
-        capex_cols = st.columns(len(capex))
-        for i, (k, v) in enumerate(capex.items()):
-            capex_cols[i].metric(k.capitalize(), v)
-    else:
-        st.info("Sem dados de CAPEX disponíveis.")
-
-    st.header("📅 Custos Mensais (OPEX)")
-    opex = custos.get("opex_monthly", {})
-    if opex:
-        opex_cols = st.columns(len(opex))
-        for i, (k, v) in enumerate(opex.items()):
-            opex_cols[i].metric(k.capitalize(), v)
-    else:
-        st.info("Sem dados de OPEX disponíveis.")
-
-    st.header("Resumo Financeiro")
-    st.success(custos.get("summary_text", ""))
-
-    with st.expander("Premissas e Observações"):
-        st.write(custos.get("one_line_assumptions", ""))
-
-    st.header("🚀 Próximos Passos")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Validar ideia com clientes"):
-            st.info("Converse com potenciais clientes para validar sua proposta!")
-    with col2:
-        if st.button("Ajustar plano financeiro"):
-            st.info("Revise custos e receitas com um contador especializado.")
-    with col3:
-        if st.button("Ver dicas de marketing"):
-            st.info("Foque em diferenciais e comunicação visual consistente para seu público.")
-
-    with st.expander("Baixar plano em JSON"):
-        st.download_button(
-            label="Baixar plano (JSON)",
-            data=json.dumps(final_output, ensure_ascii=False, indent=2),
-            file_name="plano_negocio.json",
-            mime="application/json"
-        )
+        st.error(f"⚠️ Erro: {resultado['notes']}")
