@@ -1,27 +1,31 @@
-# agents/logo_maker.py
 import os
 import requests
-from dotenv import load_dotenv
-import re
+import streamlit as st
 
-# Carrega variáveis do .env
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_KEY = os.getenv("CLIENT_KEY")
-REALM = os.getenv("REALM", "stackspot-freemium")
+# Função auxiliar para carregar variáveis
+def get_secret(key, default=None):
+    if key in st.secrets:  # Streamlit Cloud
+        return st.secrets[key]
+    return os.getenv(key, default)  # Local .env
 
-AGENT_ID = "01K5VTYNFBDQQ0VR9PD29HNYC8"
+# Configurações
+CLIENT_ID = get_secret("CLIENT_ID")
+CLIENT_KEY = get_secret("CLIENT_KEY")
+REALM = get_secret("REALM", "stackspot-freemium")
+
 OAUTH_URL = f"https://idm.stackspot.com/{REALM}/oidc/oauth/token"
+AGENT_ID = "01K5VTYNFBDQQ0VR9PD29HNYC8"
 AGENT_URL = f"https://genai-inference-app.stackspot.com/v1/agent/{AGENT_ID}/chat"
 
 
 def run_logo_maker(input_data):
     prompt = input_data.get("logo_prompt_for_ai", "").strip()
-    client_id = input_data.get("client_id", CLIENT_ID)
-    client_key = input_data.get("client_key", CLIENT_KEY)
-    realm = input_data.get("realm", REALM)
-
     if not prompt:
         return {
             "original_prompt": "",
@@ -30,21 +34,21 @@ def run_logo_maker(input_data):
             "image_meta": {},
             "notes": "Prompt para a logo não fornecido."
         }
-    if not all([client_id, client_key, realm]):
+    if not CLIENT_ID or not CLIENT_KEY:
         return {
             "original_prompt": prompt,
             "logo_image_url": "",
             "logo_image_markdown": "",
             "image_meta": {},
-            "notes": "Credenciais StackSpot ausentes."
+            "notes": "Client ID ou Client Key não encontrados."
         }
 
     try:
-        # 1️⃣ Obter token OAuth
+        # Autenticação
         payload = {
             "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_key
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_KEY
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         token_response = requests.post(OAUTH_URL, data=payload, headers=headers, timeout=30)
@@ -53,7 +57,7 @@ def run_logo_maker(input_data):
         if not access_token:
             raise Exception("Não foi possível obter o access token.")
 
-        # 2️⃣ Chamar o agente StackSpot
+        # Chamada ao agente
         agent_headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
@@ -68,28 +72,25 @@ def run_logo_maker(input_data):
         response.raise_for_status()
         data = response.json()
 
-        # 3️⃣ Extrair URL da imagem
+        # Extração da URL da imagem
         image_url = ""
         for key in ["image_url", "logo_image_url", "url", "message"]:
             if key in data and isinstance(data[key], str) and data[key].startswith("http"):
                 image_url = data[key]
                 break
-
         if not image_url and "http" in str(data):
-            urls = re.findall(r'(https?://[^\s)"]+)', str(data))
+            import re
+            urls = re.findall(r'(https?://[^\s)]+)', str(data))
             if urls:
                 image_url = urls[0]
-
-        image_url = image_url.strip().strip('",')
 
         return {
             "original_prompt": prompt,
             "logo_image_url": image_url,
             "logo_image_markdown": f"![logo]({image_url})" if image_url else "",
             "image_meta": {},
-            "notes": "Resposta do agente StackSpot." if image_url else "Não foi possível extrair a URL da imagem."
+            "notes": "Resposta do agente StackSpot."
         }
-
     except Exception as e:
         return {
             "original_prompt": prompt,
@@ -100,6 +101,9 @@ def run_logo_maker(input_data):
         }
 
 
+# ----------------------------
+# Teste no terminal
+# ----------------------------
 if __name__ == "__main__":
     print("🔹 Testando logo_maker.py")
     test_input = {"logo_prompt_for_ai": "Logomarca moderna e minimalista para cafeteria"}
