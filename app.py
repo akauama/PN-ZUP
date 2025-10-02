@@ -4,10 +4,11 @@ import os
 import base64
 import requests
 from io import BytesIO
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from dotenv import load_dotenv
 from orchestrator import multiagent_flow
 
+# Carrega variáveis de ambiente
 load_dotenv()
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_KEY")
@@ -15,26 +16,6 @@ REALM = os.getenv("REALM", "stackspot-freemium")
 
 if not all([CLIENT_ID, CLIENT_SECRET, REALM]):
     st.error("⚠️ Variáveis de ambiente não carregadas corretamente. Verifique seu arquivo .env")
-    st.stop()
-
-token_url = f"https://idm.stackspot.com/{REALM}/oidc/oauth/token"
-token_data = {
-    "client_id": CLIENT_ID,
-    "grant_type": "client_credentials",
-    "client_secret": CLIENT_SECRET
-}
-token_headers = {
-    "Content-Type": "application/x-www-form-urlencoded"
-}
-try:
-    token_response = requests.post(token_url, data=token_data, headers=token_headers)
-    token_response.raise_for_status()
-    access_token = token_response.json().get("access_token")
-    if not access_token:
-        st.error("Access token não retornado!")
-        st.stop()
-except Exception as e:
-    st.error(f"Erro ao obter token: {e}")
     st.stop()
 
 st.set_page_config(page_title="PN-ZUP Multiagente", layout="wide")
@@ -64,6 +45,7 @@ if submitted:
     if not business_idea or not audience or not cidade:
         st.warning("Por favor, preencha todos os campos obrigatórios.")
         st.stop()
+
     user_input = {
         "business_idea": business_idea,
         "audience": audience,
@@ -76,6 +58,7 @@ if submitted:
         "stk_client_key": CLIENT_SECRET,
         "stk_realm": REALM
     }
+
     with st.spinner("Gerando plano de negócio..."):
         try:
             final_output = multiagent_flow(user_input)
@@ -90,20 +73,23 @@ if submitted:
 
     branding = final_output.get("branding", {})
     st.header("🎨 Branding & Marketing")
+
     nomes = branding.get('suggested_names', [])
     st.subheader("Sugestões de nomes")
     if nomes:
         cols = st.columns(len(nomes))
         for i, name in enumerate(nomes):
-            if cols[i].button(name, key=f"name_{name}"):
+            if cols[i].button(name, key=f"name_{i}_{name}"):
                 st.success(f"Nome '{name}' copiado! (Copie manualmente)")
     else:
         st.info("Nenhum nome sugerido. Tente uma ideia de negócio mais específica para sugestões mais criativas.")
 
     st.subheader("Slogan")
     st.info(branding.get('slogan', '-'))
+
     st.subheader("Tom de marca")
     st.write(branding.get('brand_tone', '-'))
+
     st.subheader("Descrição da logomarca")
     st.write(branding.get('logo_description', '-'))
 
@@ -111,8 +97,7 @@ if submitted:
     logo_dict = final_output.get("logo", {})
     logo_url = logo_dict.get("logo_image_url", "")
     logo_base64 = logo_dict.get("logo_image_base64", "")
-    st.write("DEBUG - logo_image_url:", logo_url)
-    st.write("DEBUG - logo_image_base64 (início):", logo_base64[:100] if logo_base64 else "Vazio")
+
     if logo_base64:
         if "," in logo_base64:
             base64_data = logo_base64.split(",")[1]
@@ -121,7 +106,7 @@ if submitted:
         try:
             image_data = base64.b64decode(base64_data)
             image = Image.open(BytesIO(image_data))
-            st.image(image, caption="Logo criada para seu negócio", use_container_width=True)
+            st.image(image, caption="Logo criada para seu negócio", width="stretch")
             st.success("Imagem exibida a partir do Base64!")
         except Exception as e:
             st.error(f"Erro ao decodificar imagem Base64: {e}")
@@ -130,7 +115,7 @@ if submitted:
             response = requests.get(logo_url)
             if response.status_code == 200:
                 image = Image.open(BytesIO(response.content))
-                st.image(image, caption="Logo criada para seu negócio", use_container_width=True)
+                st.image(image, caption="Logo criada para seu negócio", width="stretch")
                 st.success("Imagem exibida a partir da URL!")
             else:
                 st.error(f"Erro ao baixar imagem: Status {response.status_code}")
@@ -139,6 +124,7 @@ if submitted:
     else:
         st.warning("Logo não gerada. Verifique as credenciais e a API.")
 
+    # Custos
     custos = final_output.get("costs", {})
     st.header("💰 Investimento Inicial (CAPEX)")
     capex = custos.get("capex_estimate", {})
