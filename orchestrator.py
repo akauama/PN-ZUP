@@ -1,6 +1,5 @@
 from agents import branding_marketing, costwiz, logo_maker
 
-
 def multiagent_flow(user_input):
     context_costs = user_input.get("context_costs", {})
     location = context_costs.get("cidade") or user_input.get("cidade", "")
