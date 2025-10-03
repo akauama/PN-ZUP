@@ -1,108 +1,164 @@
 import streamlit as st
+import json
+import base64
+import requests
+from io import BytesIO
+from PIL import Image
+from orchestrator import multiagent_flow
 
-if "CLIENT_ID" in st.secrets:
-    CLIENT_ID = st.secrets["CLIENT_ID"]
-    CLIENT_SECRET = st.secrets["CLIENT_KEY"]
-    REALM = st.secrets.get("REALM", "stackspot-freemium")
-else:
-    from dotenv import load_dotenv
-    import os
-    load_dotenv()
-    CLIENT_ID = os.getenv("CLIENT_ID")
-    CLIENT_SECRET = os.getenv("CLIENT_KEY")
-    REALM = os.getenv("REALM", "stackspot-freemium")
+# Credenciais do secrets
+CLIENT_ID = st.secrets.get("CLIENT_ID", "")
+CLIENT_SECRET = st.secrets.get("CLIENT_KEY", "")
+REALM = st.secrets.get("REALM", "stackspot-freemium")
 
-AGENT_ID = "01K5VTYNFBDQQ0VR9PD29HNYC8"
-OAUTH_URL = f"https://idm.stackspot.com/{REALM}/oidc/oauth/token"
-AGENT_URL = f"https://genai-inference-app.stackspot.com/v1/agent/{AGENT_ID}/chat"
+if not all([CLIENT_ID, CLIENT_SECRET, REALM]):
+    st.error("⚠️ Credenciais não carregadas. Configure-as no Streamlit Cloud (Secrets).")
+    st.stop()
 
+st.set_page_config(page_title="PN-ZUP Multiagente", layout="wide")
+st.title("PN-ZUP Multiagente - Teste")
 
-def run_logo_maker(input_data):
-    prompt = input_data.get("logo_prompt_for_ai", "").strip()
-    client_id = input_data.get("client_id", CLIENT_ID)
-    client_key = input_data.get("client_key", CLIENT_KEY)
-    realm = input_data.get("realm", REALM)
+with st.form("user_inputs"):
+    business_idea = st.text_input(
+        "Ideia de negócio",
+        "Cafeteria para jovens com cafés especiais e doces artesanais",
+        help="Descreva sua ideia de negócio."
+    )
+    audience = st.text_input(
+        "Público-alvo",
+        "Universitários de 18 a 25 anos",
+        help="Quem é o público principal?"
+    )
+    cidade = st.text_input("Cidade", "Salvador")
+    tamanho = st.number_input("Tamanho do ponto (m²)", min_value=5, value=25)
+    logo_style = st.selectbox(
+        "Estilo da logomarca",
+        ["Moderno e profissional", "Divertido e colorido", "Minimalista", "Clássico", "Vintage"],
+        help="Escolha o estilo visual desejado para a logomarca."
+    )
+    submitted = st.form_submit_button("Gerar plano")
 
-    if not prompt:
-        return {
-            "original_prompt": "",
-            "logo_image_url": "",
-            "logo_image_markdown": "",
-            "image_meta": {},
-            "notes": "Prompt para a logo não fornecido."
-        }
-    if not all([client_id, client_key, realm]):
-        return {
-            "original_prompt": prompt,
-            "logo_image_url": "",
-            "logo_image_markdown": "",
-            "image_meta": {},
-            "notes": "Credenciais StackSpot ausentes."
-        }
+if submitted:
+    if not business_idea or not audience or not cidade:
+        st.warning("Por favor, preencha todos os campos obrigatórios.")
+        st.stop()
 
-    try:
-        # 1️⃣ Obter token OAuth
-        payload = {
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_key
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        token_response = requests.post(OAUTH_URL, data=payload, headers=headers, timeout=30)
-        token_response.raise_for_status()
-        access_token = token_response.json().get("access_token", "")
-        if not access_token:
-            raise Exception("Não foi possível obter o access token.")
+    user_input = {
+        "business_idea": business_idea,
+        "audience": audience,
+        "context_costs": {
+            "cidade": cidade,
+            "tamanho_ponto_m2": tamanho
+        },
+        "logo_style": logo_style,
+        "stk_client_id": CLIENT_ID,
+        "stk_client_key": CLIENT_SECRET,
+        "stk_realm": REALM
+    }
 
-        # 2️⃣ Chamar o agente StackSpot
-        agent_headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        agent_payload = {
-            "streaming": False,
-            "user_prompt": prompt,
-            "stackspot_knowledge": False,
-            "return_ks_in_response": True
-        }
-        response = requests.post(AGENT_URL, headers=agent_headers, json=agent_payload, timeout=120)
-        response.raise_for_status()
-        data = response.json()
+    with st.spinner("Gerando plano de negócio..."):
+        try:
+            final_output = multiagent_flow(user_input)
+        except Exception as e:
+            st.error(f"Erro ao gerar o plano: {e}")
+            st.stop()
 
-        # 3️⃣ Extrair URL da imagem
-        image_url = ""
-        for key in ["image_url", "logo_image_url", "url", "message"]:
-            if key in data and isinstance(data[key], str) and data[key].startswith("http"):
-                image_url = data[key]
-                break
+    # ⚡️ Mantive toda a parte de exibição igual ao seu local
+    errors = final_output.get("errors", {})
+    for key, msg in errors.items():
+        if msg:
+            st.warning(f"⚠️ {key.capitalize()}: {msg}")
 
-        if not image_url and "http" in str(data):
-            urls = re.findall(r'(https?://[^\s)"]+)', str(data))
-            if urls:
-                image_url = urls[0]
+    branding = final_output.get("branding", {})
+    st.header("🎨 Branding & Marketing")
 
-        image_url = image_url.strip().strip('",')
+    nomes = branding.get('suggested_names', [])
+    st.subheader("Sugestões de nomes")
+    if nomes:
+        cols = st.columns(len(nomes))
+        for i, name in enumerate(nomes):
+            if cols[i].button(name, key=f"name_{i}_{name}"):
+                st.success(f"Nome '{name}' copiado! (Copie manualmente)")
+    else:
+        st.info("Nenhum nome sugerido.")
 
-        return {
-            "original_prompt": prompt,
-            "logo_image_url": image_url,
-            "logo_image_markdown": f"![logo]({image_url})" if image_url else "",
-            "image_meta": {},
-            "notes": "Resposta do agente StackSpot." if image_url else "Não foi possível extrair a URL da imagem."
-        }
+    st.subheader("Slogan")
+    st.info(branding.get('slogan', '-'))
 
-    except Exception as e:
-        return {
-            "original_prompt": prompt,
-            "logo_image_url": "",
-            "logo_image_markdown": "",
-            "image_meta": {},
-            "notes": f"Erro ao gerar imagem: {str(e)}"
-        }
+    st.subheader("Tom de marca")
+    st.write(branding.get('brand_tone', '-'))
 
+    st.subheader("Descrição da logomarca")
+    st.write(branding.get('logo_description', '-'))
 
-if __name__ == "__main__":
-    print("🔹 Testando logo_maker.py")
-    test_input = {"logo_prompt_for_ai": "Logomarca moderna e minimalista para cafeteria"}
-    resultado = run_logo_maker(test_input)
-    print("Resultado:", resultado)
+    st.subheader("Logo gerada")
+    logo_dict = final_output.get("logo", {})
+    logo_url = logo_dict.get("logo_image_url", "")
+    logo_base64 = logo_dict.get("logo_image_base64", "")
+
+    if logo_base64:
+        try:
+            base64_data = logo_base64.split(",")[1] if "," in logo_base64 else logo_base64
+            image_data = base64.b64decode(base64_data)
+            image = Image.open(BytesIO(image_data))
+            st.image(image, caption="Logo criada para seu negócio", use_column_width=True)
+        except Exception as e:
+            st.error(f"Erro ao decodificar imagem Base64: {e}")
+    elif logo_url:
+        try:
+            response = requests.get(logo_url)
+            if response.status_code == 200:
+                image = Image.open(BytesIO(response.content))
+                st.image(image, caption="Logo criada para seu negócio", use_column_width=True)
+            else:
+                st.error(f"Erro ao baixar imagem: Status {response.status_code}")
+        except Exception as e:
+            st.error(f"Erro ao exibir imagem da URL: {e}")
+    else:
+        st.warning("Logo não gerada. Verifique as credenciais e a API.")
+
+    # ⚡️ Custos
+    custos = final_output.get("costs", {})
+    st.header("💰 Investimento Inicial (CAPEX)")
+    capex = custos.get("capex_estimate", {})
+    if capex:
+        capex_cols = st.columns(len(capex))
+        for i, (k, v) in enumerate(capex.items()):
+            capex_cols[i].metric(k.capitalize(), v)
+    else:
+        st.info("Sem dados de CAPEX disponíveis.")
+
+    st.header("📅 Custos Mensais (OPEX)")
+    opex = custos.get("opex_monthly", {})
+    if opex:
+        opex_cols = st.columns(len(opex))
+        for i, (k, v) in enumerate(opex.items()):
+            opex_cols[i].metric(k.capitalize(), v)
+    else:
+        st.info("Sem dados de OPEX disponíveis.")
+
+    st.header("Resumo Financeiro")
+    st.success(custos.get("summary_text", ""))
+
+    with st.expander("Premissas e Observações"):
+        st.write(custos.get("one_line_assumptions", ""))
+
+    st.header("🚀 Próximos Passos")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Validar ideia com clientes"):
+            st.info("Converse com potenciais clientes para validar sua proposta!")
+    with col2:
+        if st.button("Ajustar plano financeiro"):
+            st.info("Revise custos e receitas com um contador especializado.")
+    with col3:
+        if st.button("Ver dicas de marketing"):
+            st.info("Foque em diferenciais e comunicação visual consistente.")
+
+    with st.expander("Baixar plano em JSON"):
+        st.download_button(
+            label="Baixar plano (JSON)",
+            data=json.dumps(final_output, ensure_ascii=False, indent=2),
+            file_name="plano_negocio.json",
+            mime="application/json"
+        )
