@@ -65,7 +65,7 @@ streamlit run app.py
 
 No Streamlit Cloud:
 Acesse o app online no link:
-🔗 PN-ZUP Multiagente no Streamlit Cloud
+🔗 https://pn-zup.streamlit.app/
 
 Preencha os campos de ideia de negócio, público-alvo, cidade e tamanho do ponto.
 Clique em Gerar plano para visualizar o JSON completo e a logomarca (quando a API estiver configurada).
